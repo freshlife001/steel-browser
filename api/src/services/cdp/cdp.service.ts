@@ -80,7 +80,7 @@ export class CDPService extends EventEmitter {
     this.currentSessionConfig = null;
     this.shuttingDown = false;
     this.defaultLaunchConfig = {
-      options: { headless: env.CHROME_HEADLESS, args: [] },
+      options: { headless: env.CHROME_HEADLESS, proxyUrl:env.PROXY_URL,  args: [] },
       blockAds: true,
       extensions: [],
     };
@@ -121,11 +121,11 @@ export class CDPService extends EventEmitter {
   }
 
   public getDebuggerUrl() {
-    return `http://${env.HOST}:${env.CDP_REDIRECT_PORT}/devtools/devtools_app.html`;
+    return `http://${env.CDP_REDIRECT_HOST}:${env.CDP_REDIRECT_PORT}/devtools/devtools_app.html`;
   }
 
   public getDebuggerWsUrl(pageId?: string) {
-    return `ws://${env.HOST}:${env.CDP_REDIRECT_PORT}/devtools/page/${pageId ?? this.getTargetId(this.primaryPage!)}`;
+    return `ws://${env.CDP_REDIRECT_HOST}:${env.CDP_REDIRECT_PORT}/devtools/page/${pageId ?? this.getTargetId(this.primaryPage!)}`;
   }
 
   public customEmit(event: EmitEvent, payload: any) {
