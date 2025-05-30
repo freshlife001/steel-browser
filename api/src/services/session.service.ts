@@ -201,7 +201,7 @@ export class SessionService {
         debugUrl: getUrl("v1/sessions/debug"),
         debuggerUrl: getUrl("v1/devtools/inspector.html"),
         sessionViewerUrl: getBaseUrl(),
-        userAgent: this.cdpService.getUserAgent(),
+        userAgent: this.cdpService.getUserAgent() ?? "",
       });
     }
 
