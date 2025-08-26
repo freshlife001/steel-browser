@@ -3,17 +3,19 @@ import { useState } from "react";
 import SessionDetails from "./session-details";
 import SessionLogs from "./session-logs";
 import SessionDevTools from "./session-devtools";
+import SessionPlayground from "./session-playground";
 
 interface SessionConsoleProps {
   id: string | null;
 }
 
 export default function SessionConsole({ id }: SessionConsoleProps) {
-  const [activeTab, setActiveTab] = useState<"details" | "logs" | "dev-tools">(
-    "details"
+  const [activeTab, setActiveTab] = useState<"playground" | "details" | "logs" | "dev-tools">(
+    "playground"
   );
 
-  const tabs: { value: "details" | "logs" | "dev-tools"; label: string }[] = [
+  const tabs: { value: "details" | "logs" | "dev-tools" | "playground"; label: string }[] = [
+    { value: "playground", label: "API Playground" },
     { value: "details", label: "Details" },
     { value: "logs", label: "Logs" },
     { value: "dev-tools", label: "Dev Tools" },
@@ -22,7 +24,7 @@ export default function SessionConsole({ id }: SessionConsoleProps) {
   return (
     <div className="flex flex-col w-full h-full">
       <div className="flex flex-row justify-between items-center bg-[var(--gray-3)] p-2">
-        <Tabs defaultValue="details">
+        <Tabs defaultValue="playground">
           <TabsList className="bg-transparent">
             {tabs.map((tab) => (
               <TabsTrigger
@@ -45,6 +47,7 @@ export default function SessionConsole({ id }: SessionConsoleProps) {
       {activeTab === "details" && <SessionDetails id={id} />}
       {activeTab === "logs" && <SessionLogs id={id!} />}
       {activeTab === "dev-tools" && <SessionDevTools />}
+      {activeTab === "playground" && <SessionPlayground id={id} />}
     </div>
   );
 }
