@@ -28,6 +28,14 @@ interface OpenAPIEndpoint {
       };
     };
   };
+  responses?: Record<string, {
+    description?: string;
+    content?: {
+      "application/json"?: {
+        schema?: any;
+      };
+    };
+  }>;
 }
 
 interface OpenAPISchema {
@@ -61,6 +69,7 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
   const [formData, setFormData] = useState<Record<string, any>>({});
   const [response, setResponse] = useState<any>(null);
   const [responseLoading, setResponseLoading] = useState(false);
+  const [responseMode, setResponseMode] = useState<"raw" | "form">("form");
   const [endpoints, setEndpoints] = useState<Array<{ path: string; method: string; summary?: string }>>([]);
 
   useEffect(() => {
@@ -105,6 +114,7 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     setSelectedEndpoint(path);
     setParameters({});
     setResponse(null);
+    setResponseMode("form");
     setRequestBodyError(null);
     setRequestBodyMode("form");
     setFormData({});
@@ -346,6 +356,231 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     }
     
     return formData;
+  };
+
+  const renderResponseField = (key: string, value: any, schema: any, path: string = "", isRoot: boolean = false) => {
+    // Root level object - render as table
+    if (isRoot && schema.type === "object" && schema.properties) {
+      const properties = Object.entries(schema.properties);
+      const data = value || {};
+      
+      // Special handling for TaskListResponse - show tasks array as table
+      if (key === "response" && properties.some(([propKey]) => propKey === "tasks")) {
+        const tasksProperty = properties.find(([propKey]) => propKey === "tasks");
+        if (tasksProperty) {
+          const [tasksKey, tasksSchema] = tasksProperty;
+          const tasksData = data[tasksKey];
+          
+          return (
+            <div className="space-y-4">
+              {/* Render non-tasks properties as two-column table */}
+              <div className="border border-gray-700 rounded-lg overflow-hidden">
+                <div className="bg-gray-900 px-3 py-2 border-b border-gray-700">
+                  <span className="text-sm font-medium text-gray-300">Pagination Info</span>
+                </div>
+                <div className="p-3 bg-gray-800">
+                  {renderObjectAsTwoColumnTable(
+                    Object.fromEntries(properties.filter(([propKey]) => propKey !== "tasks").map(([key]) => [key, data[key]])),
+                    {
+                      type: "object",
+                      properties: Object.fromEntries(properties.filter(([propKey]) => propKey !== "tasks"))
+                    }
+                  )}
+                </div>
+              </div>
+              
+              {/* Render tasks array as separate table */}
+              <div>
+                <h4 className="text-sm font-medium text-gray-300 mb-2">Tasks ({Array.isArray(tasksData) ? tasksData.length : 0})</h4>
+                {Array.isArray(tasksData) && (tasksSchema as any).type === "array" && (tasksSchema as any).items ? (
+                  renderArrayAsTable(tasksData, (tasksSchema as any).items, `${path}.${tasksKey}`)
+                ) : (
+                  <div className="text-sm text-gray-500">No tasks data</div>
+                )}
+              </div>
+            </div>
+          );
+        }
+      }
+      
+      // Default object rendering - use two-column table for better readability
+      return (
+        <div className="border border-gray-700 rounded-lg overflow-hidden">
+          <div className="bg-gray-900 px-3 py-2 border-b border-gray-700">
+            <span className="text-sm font-medium text-gray-300">Response Data</span>
+          </div>
+          <div className="p-3 bg-gray-800">
+            {renderObjectAsTwoColumnTable(data, schema)}
+          </div>
+        </div>
+      );
+    }
+    
+    // Root level array - render as table
+    if (isRoot && schema.type === "array" && schema.items && Array.isArray(value)) {
+      return renderArrayAsTable(value, schema.items, path);
+    }
+    
+    // Nested objects - continue with form rendering
+    if (schema.type === "object" && schema.properties) {
+      return (
+        <div className="space-y-4">
+          {Object.entries(schema.properties).map(([propKey, propSchema]: [string, any]) => (
+            <div key={propKey} className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Label className="text-sm font-medium">
+                  {propKey}
+                  {schema.required?.includes(propKey) && <span className="text-red-500">*</span>}
+                </Label>
+                <span className="text-xs text-gray-500">({propSchema.type})</span>
+              </div>
+              {renderResponseField(propKey, value?.[propKey], propSchema, path ? `${path}.${propKey}` : propKey)}
+            </div>
+          ))}
+        </div>
+      );
+    } else if (schema.type === "array" && schema.items) {
+      return (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <Label className="text-sm font-medium">{key}</Label>
+            <span className="text-xs text-gray-500">(array of {schema.items.type})</span>
+          </div>
+          {Array.isArray(value) ? value.map((item, index) => (
+            <div key={index} className="space-y-2 border border-gray-200 rounded p-2">
+              {renderResponseField(`${key}[${index}]`, item, schema.items, `${path}[${index}]`)}
+            </div>
+          )) : (
+            <div className="text-sm text-gray-500">No data</div>
+          )}
+        </div>
+      );
+    } else if (schema.enum) {
+      return (
+        <div className="text-sm">
+          <span className="font-medium">{key}: </span>
+          <span className="capitalize">{value}</span>
+        </div>
+      );
+    }
+
+    return (
+      <div className="text-sm">
+        <span className="font-medium">{key}: </span>
+        <span>{value !== null && value !== undefined ? String(value) : "null"}</span>
+      </div>
+    );
+  };
+
+  const renderNestedObject = (value: any, schema: any) => {
+    if (value === null || value === undefined) {
+      return <span className="text-gray-500">null</span>;
+    }
+    
+    // Check if the value is actually an object or array, regardless of schema
+    const isObject = typeof value === 'object' && value !== null && !Array.isArray(value);
+    const isArray = Array.isArray(value);
+    
+    // For nested objects, always show as raw JSON
+    if (isObject || (schema.type === "object" && schema.properties)) {
+      return (
+        <pre className="bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-32">
+          <code className="text-green-400">{JSON.stringify(value, null, 2)}</code>
+        </pre>
+      );
+    }
+    
+    // For arrays, always show as raw JSON
+    if (isArray || (schema.type === "array" && schema.items)) {
+      return (
+        <pre className="bg-gray-900 p-2 rounded text-xs overflow-x-auto max-h-32">
+          <code className="text-green-400">{JSON.stringify(value, null, 2)}</code>
+        </pre>
+      );
+    }
+    
+    if (schema.enum) {
+      return <span className="capitalize font-medium text-gray-300">{value}</span>;
+    }
+    
+    return <span className="text-gray-300">{String(value)}</span>;
+  };
+
+  const renderArrayAsTable = (array: any[], itemSchema: any, _path: string) => { // eslint-disable-line @typescript-eslint/no-unused-vars
+    if (array.length === 0) {
+      return <div className="text-sm text-gray-500">No data</div>;
+    }
+
+    // If array items are objects with properties, render as individual two-column tables
+    if (itemSchema.type === "object" && itemSchema.properties) {
+      return (
+        <div className="space-y-4">
+          {array.map((item, index) => (
+            <div key={index} className="border border-gray-700 rounded-lg overflow-hidden">
+              <div className="bg-gray-900 px-3 py-2 border-b border-gray-700">
+                <span className="text-sm font-medium text-gray-300">
+                  Item {index + 1}{item.name && `: ${item.name}`}{item.id && ` (ID: ${item.id})`}
+                </span>
+              </div>
+              <div className="p-3 bg-gray-800">
+                {renderObjectAsTwoColumnTable(item, itemSchema)}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // For primitive arrays, show as list
+    return (
+      <div className="space-y-1">
+        {array.map((item, index) => (
+          <div key={index} className="text-sm border border-gray-200 rounded p-2">
+            {renderNestedObject(item, itemSchema)}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderObjectAsTwoColumnTable = (obj: any, schema: any) => {
+    if (!schema.properties) {
+      return (
+        <pre className="bg-gray-900 p-2 rounded text-xs overflow-x-auto">
+          <code className="text-green-400">{formatJSON(obj)}</code>
+        </pre>
+      );
+    }
+
+    const properties = Object.entries(schema.properties);
+    
+    return (
+      <div className="overflow-x-auto">
+        <table className="min-w-full border-separate border-spacing-0">
+          <tbody>
+            {properties.map(([propKey, propSchema]) => {
+              const value = obj?.[propKey];
+              const isRequired = schema.required?.includes(propKey);
+              
+              return (
+                <tr key={propKey} className="border-b border-gray-700 last:border-0">
+                  <td className="px-3 py-2 text-sm font-medium text-gray-300 align-top w-1/3 bg-gray-900">
+                    <div className="flex items-center gap-1">
+                      <span>{propKey}</span>
+                      {isRequired && <span className="text-red-400">*</span>}
+                    </div>
+                    <div className="text-xs text-gray-500 font-normal">({(propSchema as any).type})</div>
+                  </td>
+                  <td className="px-3 py-2 text-sm text-gray-100 align-top w-2/3 bg-gray-800">
+                    {renderNestedObject(value, propSchema)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
   };
 
   const renderFormField = (key: string, schema: any, path: string = "") => {
@@ -640,9 +875,39 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
               )}
             </CardHeader>
             <CardContent>
-              <pre className="bg-[var(--gray-1)] p-3 rounded text-xs overflow-x-auto">
-                <code>{formatJSON(response.error || response.data)}</code>
-              </pre>
+              {!response.error && response.data && getEndpointDetails()?.responses?.[response.status]?.content?.['application/json']?.schema ? (
+                <Tabs value={responseMode} onValueChange={(value) => setResponseMode(value as "raw" | "form")}>
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="raw">Raw JSON</TabsTrigger>
+                    <TabsTrigger value="form">Form View</TabsTrigger>
+                  </TabsList>
+                  
+                  <TabsContent value="raw" className="mt-4">
+                    <pre className="bg-[var(--gray-1)] p-3 rounded text-xs overflow-x-auto">
+                      <code>{formatJSON(response.data)}</code>
+                    </pre>
+                  </TabsContent>
+                  
+                  <TabsContent value="form" className="mt-4">
+                    <div className="space-y-4">
+                      {renderResponseField(
+                        "response",
+                        response.data,
+                        resolveSchemaRef(
+                          getEndpointDetails()?.responses?.[response.status]?.content?.['application/json']?.schema,
+                          schema
+                        ),
+                        "",
+                        true
+                      )}
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              ) : (
+                <pre className="bg-[var(--gray-1)] p-3 rounded text-xs overflow-x-auto">
+                  <code>{formatJSON(response.error || response.data)}</code>
+                </pre>
+              )}
             </CardContent>
           </Card>
         )}
