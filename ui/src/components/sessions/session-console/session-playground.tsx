@@ -1259,11 +1259,11 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
       )}
       
       <div className="p-4 border-b border-[var(--gray-6)]">
-        <div className="flex gap-4 items-end">
-          <div className="flex-1">
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
+          <div className="flex-1 min-w-0">
             <Label htmlFor="endpoint">API Endpoint</Label>
             <Select value={currentEndpointKey} onValueChange={handleEndpointChange}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue placeholder="Select an endpoint" />
               </SelectTrigger>
               <SelectContent>
@@ -1279,9 +1279,9 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
                       }`}>
                         {endpoint.method}
                       </span>
-                      <span className="font-mono text-sm">{endpoint.path}</span>
+                      <span className="font-mono text-sm truncate">{endpoint.path}</span>
                       {endpoint.summary && (
-                        <span className="text-xs text-gray-500 ml-2">{endpoint.summary}</span>
+                        <span className="text-xs text-gray-500 ml-2 hidden sm:inline">{endpoint.summary}</span>
                       )}
                     </div>
                   </SelectItem>
@@ -1292,7 +1292,7 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
           <Button 
             onClick={executeRequest} 
             disabled={!selectedEndpoint || responseLoading}
-            className="whitespace-nowrap"
+            className="whitespace-nowrap w-full sm:w-auto"
           >
             {responseLoading ? "Executing..." : "Execute Request"}
           </Button>

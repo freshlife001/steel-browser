@@ -586,18 +586,21 @@
       },
       "get": {
         "operationId": "get_sessions",
-        "summary": "Get all sessions (only returns current session)",
+        "summary": "Get all sessions",
         "tags": [
           "Sessions"
         ],
-        "description": "Get all sessions (only returns current session)",
+        "description": "Get all active sessions",
         "responses": {
           "200": {
             "description": "Default Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionDetails"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SessionDetails"
+                  }
                 }
               }
             }

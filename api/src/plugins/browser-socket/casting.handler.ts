@@ -61,6 +61,7 @@ export async function handleCastSession(
     let heartbeatInterval: NodeJS.Timeout | null = null;
 
     const handleSessionCleanup = () => {
+      console.log("handleSessionCleanup");
       if (heartbeatInterval) {
         clearInterval(heartbeatInterval);
         heartbeatInterval = null;
@@ -96,9 +97,10 @@ export async function handleCastSession(
       // Disconnect browser
       if (browser) {
         try {
-          browser.disconnect().catch((err) => {
-            console.error("Error disconnecting browser:", err);
-          });
+          // [BUG] disconnect will close all tabs
+          // browser.disconnect().catch((err) => {
+          //   console.error("Error disconnecting browser:", err);
+          // });
           browser = null;
         } catch (err) {
           console.error("Error during browser disconnect:", err);
