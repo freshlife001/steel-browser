@@ -26,7 +26,7 @@ const logger: FastifyPluginAsync = async (fastify) => {
       req.raw.url !== "/v1/events" &&
       req.raw.url !== "/"
     ) {
-      req.log.info(
+      req.log.debug(
         {
           ip: getClientIp(req),
           url: req.raw.url,

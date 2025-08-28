@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import SessionRunningStatus from "./session-running-status";
 
 interface OpenAPIEndpoint {
   path: string;
@@ -52,6 +53,7 @@ interface OpenAPISchema {
 
 interface SessionPlaygroundProps {
   id: string | null;
+  onRunStart?: (runId: string) => void;
 }
 
 export default function SessionPlayground({ id }: SessionPlaygroundProps) {
@@ -71,10 +73,73 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
   const [responseLoading, setResponseLoading] = useState(false);
   const [responseMode, setResponseMode] = useState<"raw" | "form">("form");
   const [endpoints, setEndpoints] = useState<Array<{ path: string; method: string; summary?: string }>>([]);
+  const [tasks, setTasks] = useState<Array<{ id: number; name: string; task_type: string; status: string }>>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [tasksError, setTasksError] = useState<string | null>(null);
+  const [taskIdMode, setTaskIdMode] = useState<"dropdown" | "raw">("dropdown");
+  const [parametersSchema, setParametersSchema] = useState<any>(null);
+  const [parametersSchemaLoading, setParametersSchemaLoading] = useState(false);
+  const [currentRunId, setCurrentRunId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchOpenAPISchema();
+    fetchTasks();
   }, []);
+
+  useEffect(() => {
+    // Auto-populate browser_cdp_url in request body for the current endpoint
+    const autoPopulateBrowserCdpUrl = async () => {
+      if (selectedEndpoint && selectedMethod && schema && ['POST', 'PUT', 'PATCH'].includes(selectedMethod)) {
+        const endpointDetails = schema.paths[selectedEndpoint]?.[selectedMethod.toLowerCase()];
+        if (endpointDetails?.requestBody?.content?.['application/json']?.schema) {
+          const requestBodySchema = resolveSchemaRef(endpointDetails.requestBody.content['application/json'].schema, schema);
+          if (hasBrowserCdpUrlField(requestBodySchema) && !formData.browser_cdp_url) {
+            const cdpUrl = await getCurrentBrowserCdpUrl();
+            if (cdpUrl) {
+              setFormData(prev => ({ ...prev, browser_cdp_url: cdpUrl }));
+            }
+          }
+        }
+      }
+    };
+    
+    autoPopulateBrowserCdpUrl();
+  }, [selectedEndpoint, selectedMethod, schema, formData.browser_cdp_url]);
+
+  // Update parameters schema when task_id changes in form data
+  useEffect(() => {
+    const updateParametersSchema = async () => {
+      if (formData.task_id) {
+        setParametersSchemaLoading(true);
+        try {
+          const schema = await getTaskArgumentsSchema(formData.task_id);
+          setParametersSchema(schema);
+        } catch (err) {
+          console.error("Failed to update parameters schema:", err);
+          setParametersSchema(null);
+        } finally {
+          setParametersSchemaLoading(false);
+        }
+      } else {
+        setParametersSchema(null);
+      }
+    };
+    
+    updateParametersSchema();
+  }, [formData.task_id]);
+
+  // Sync task_id between parameters and formData (prevent infinite loops)
+  useEffect(() => {
+    if (parameters.task_id && parameters.task_id !== formData.task_id) {
+      setFormData(prev => ({ ...prev, task_id: parameters.task_id }));
+    }
+  }, [parameters.task_id]); // Only depend on parameters.task_id
+
+  useEffect(() => {
+    if (formData.task_id && formData.task_id !== parameters.task_id) {
+      setParameters(prev => ({ ...prev, task_id: formData.task_id }));
+    }
+  }, [formData.task_id]); // Only depend on formData.task_id
 
   const fetchOpenAPISchema = async () => {
     setLoading(true);
@@ -108,7 +173,123 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     }
   };
 
-  const handleEndpointChange = (endpointKey: string) => {
+  const fetchTasks = async () => {
+    setTasksLoading(true);
+    setTasksError(null);
+    try {
+      const response = await fetch(`${env.AUTOMATION_API_URL}/api/v1/tasks`);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch tasks: ${response.status}`);
+      }
+      const data = await response.json();
+      setTasks(data.tasks || []);
+    } catch (err) {
+      setTasksError(err instanceof Error ? err.message : "Failed to fetch tasks");
+    } finally {
+      setTasksLoading(false);
+    }
+  };
+
+  const getCurrentBrowserCdpUrl = async (): Promise<string> => {
+    console.log('Fetching current browser CDP URL for session ID:', id);
+    if (!id) return "ws://localhost:3000";
+    
+    try {
+      const response = await fetch(`${env.VITE_API_URL}/sessions/${id}`);
+      if (!response.ok) {
+        return "ws://localhost:3000";
+      }
+      const data = await response.json();
+      return data.browser?.cdpUrl || data.cdpUrl || "ws://localhost:3000";
+    } catch (err) {
+      console.error("Failed to fetch browser CDP URL:", err);
+      return "ws://localhost:3000";
+    }
+  };
+
+  const hasBrowserCdpUrlField = (schema: any): boolean => {
+    if (!schema) return false;
+    
+    if (schema.type === "object" && schema.properties) {
+      return "browser_cdp_url" in schema.properties;
+    }
+    
+    return false;
+  };
+
+  const getTaskArgumentsSchema = async (taskId: string): Promise<any> => {
+    if (!taskId) return null;
+    
+    try {
+      const response = await fetch(`${env.AUTOMATION_API_URL}/api/v1/tasks/${taskId}`);
+      if (!response.ok) {
+        return null;
+      }
+      const data = await response.json();
+      
+      // Extract the arguments field and infer schema from its structure
+      const taskArguments = data.arguments || {};
+      return generateSchemaFromArguments(taskArguments);
+    } catch (err) {
+      console.error("Failed to fetch task arguments schema:", err);
+      return null;
+    }
+  };
+
+  const generateSchemaFromArguments = (args: any): any => {
+    if (!args || typeof args !== 'object') {
+      return {
+        type: "object",
+        properties: {},
+        required: []
+      };
+    }
+
+    const properties: any = {};
+
+    Object.entries(args).forEach(([key, value]) => {
+      if (value !== null && value !== undefined) {
+        properties[key] = inferTypeFromValue(value);
+        // Don't mark as required since these are just example values
+      }
+    });
+
+    return {
+      type: "object",
+      properties,
+      required: []
+    };
+  };
+
+  const inferTypeFromValue = (value: any): any => {
+    if (value === null || value === undefined) {
+      return { type: "string" };
+    }
+    
+    if (typeof value === "string") {
+      return { type: "string", example: value };
+    } else if (typeof value === "number") {
+      return { type: "number", example: value };
+    } else if (typeof value === "boolean") {
+      return { type: "boolean", example: value };
+    } else if (Array.isArray(value)) {
+      return {
+        type: "array",
+        items: value.length > 0 ? inferTypeFromValue(value[0]) : { type: "string" },
+        example: value
+      };
+    } else if (typeof value === "object") {
+      return {
+        type: "object",
+        properties: generateSchemaFromArguments(value).properties,
+        example: value
+      };
+    }
+    
+    return { type: "string" };
+  };
+
+  const handleEndpointChange = async (endpointKey: string) => {
     const [method, path] = endpointKey.split(" ");
     setSelectedMethod(method);
     setSelectedEndpoint(path);
@@ -119,15 +300,36 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     setRequestBodyMode("form");
     setFormData({});
     
+    // Auto-populate browser_cdp_url in request body if the endpoint has this field
+    const endpointDetails = schema?.paths[path]?.[method.toLowerCase()];
+    if (['POST', 'PUT', 'PATCH'].includes(method) && endpointDetails?.requestBody?.content?.['application/json']?.schema) {
+      const requestBodySchema = resolveSchemaRef(endpointDetails.requestBody.content['application/json'].schema, schema);
+      if (hasBrowserCdpUrlField(requestBodySchema)) {
+        const cdpUrl = await getCurrentBrowserCdpUrl();
+        if (cdpUrl) {
+          setFormData(prev => ({ ...prev, browser_cdp_url: cdpUrl }));
+        }
+      }
+    }
+    
     // Auto-populate request body template for POST/PUT/PATCH
     if (['POST', 'PUT', 'PATCH'].includes(method)) {
-      const endpointDetails = schema?.paths[path]?.[method.toLowerCase()];
       if (endpointDetails?.requestBody?.content?.['application/json']?.schema) {
         const requestBodySchema = resolveSchemaRef(endpointDetails.requestBody.content['application/json'].schema, schema);
         const template = generateRequestBodyTemplate(requestBodySchema);
-        if (template) {
-          setRequestBody(JSON.stringify(template, null, 2));
-          setFormData(jsonToFormData(template, requestBodySchema));
+        
+        // Auto-populate browser_cdp_url in template if present
+        let finalTemplate = template;
+        if (template && hasBrowserCdpUrlField(requestBodySchema)) {
+          const cdpUrl = await getCurrentBrowserCdpUrl();
+          if (cdpUrl) {
+            finalTemplate = { ...template, browser_cdp_url: cdpUrl };
+          }
+        }
+        
+        if (finalTemplate) {
+          setRequestBody(JSON.stringify(finalTemplate, null, 2));
+          setFormData(jsonToFormData(finalTemplate, requestBodySchema));
         } else {
           setRequestBody("");
           setFormData({});
@@ -204,7 +406,11 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
       const result: Record<string, any> = {};
       Object.entries(schema.properties).forEach(([key, propSchema]: [string, any]) => {
         if (json[key] !== undefined) {
-          if (propSchema.type === "object" && propSchema.properties) {
+          if (key === "parameters") {
+            // Handle parameters field with dynamic schema
+            const nestedFormData = jsonToNestedFormData(json[key] || {}, parametersSchema || {}, "parameters");
+            Object.assign(result, nestedFormData);
+          } else if (propSchema.type === "object" && propSchema.properties) {
             result[key] = jsonToFormData(json[key], propSchema);
           } else {
             result[key] = json[key];
@@ -215,6 +421,28 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     }
     
     return json;
+  };
+
+  const jsonToNestedFormData = (json: any, schema: any, basePath: string): Record<string, any> => {
+    if (!schema || !json) return {};
+    
+    const result: Record<string, any> = {};
+    
+    if (schema.type === "object" && schema.properties) {
+      Object.entries(schema.properties).forEach(([key, propSchema]: [string, any]) => {
+        if (json[key] !== undefined) {
+          const fullPath = `${basePath}.${key}`;
+          if (propSchema.type === "object" && propSchema.properties) {
+            const nestedResult = jsonToNestedFormData(json[key], propSchema, fullPath);
+            Object.assign(result, nestedResult);
+          } else {
+            result[fullPath] = json[key];
+          }
+        }
+      });
+    }
+    
+    return result;
   };
 
   const validateRequestBody = () => {
@@ -291,6 +519,12 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
 
       const response = await fetch(finalUrl, options);
       const data = await response.json();
+      
+      // Check if this is a task execution response (has run_id)
+      if (data.run_id) {
+        setCurrentRunId(data.run_id);
+      }
+      
       setResponse({
         status: response.status,
         statusText: response.statusText,
@@ -308,6 +542,83 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
 
   const renderParameterInput = (param: any) => {
     const value = parameters[param.name] || "";
+    
+        
+    // Special handling for task_id parameter
+    if (param.name === "task_id") {
+      return (
+        <div className="space-y-2">
+          <Tabs value={taskIdMode} onValueChange={(value) => setTaskIdMode(value as "dropdown" | "raw")}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="dropdown">Select Task</TabsTrigger>
+              <TabsTrigger value="raw">Raw ID</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="dropdown" className="mt-2">
+              {tasksLoading ? (
+                <div className="text-sm text-gray-500 p-2">Loading tasks...</div>
+              ) : tasksError ? (
+                <div className="text-sm text-red-500 p-2">{tasksError}</div>
+              ) : (
+                <Select value={value} onValueChange={(v) => {
+                  setParameters(prev => ({ ...prev, [param.name]: v }));
+                  // Also update form data if this is in request body
+                  if (formData.task_id !== undefined) {
+                    setFormData(prev => ({ ...prev, task_id: v }));
+                  }
+                }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a task" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tasks.length === 0 ? (
+                      <SelectItem value="1" disabled>
+                        No tasks available (using ID: 1)
+                      </SelectItem>
+                    ) : (
+                      tasks.map((task) => (
+                        <SelectItem key={task.id} value={String(task.id)}>
+                          <div className="flex flex-col">
+                            <span className="font-medium">{task.name}</span>
+                            <span className="text-xs text-gray-500">
+                              ID: {task.id} • {task.task_type} • {task.status}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              )}
+            </TabsContent>
+            
+            <TabsContent value="raw" className="mt-2">
+              <Input
+                type="number"
+                value={value || "1"}
+                onChange={(e) => {
+                  setParameters(prev => ({ ...prev, [param.name]: e.target.value }));
+                  // Also update form data if this is in request body
+                  if (formData.task_id !== undefined) {
+                    setFormData(prev => ({ ...prev, task_id: e.target.value }));
+                  }
+                }}
+                placeholder="Enter task ID"
+                min="1"
+              />
+            </TabsContent>
+          </Tabs>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={fetchTasks}
+            className="w-full"
+          >
+            Refresh Tasks
+          </Button>
+        </div>
+      );
+    }
     
     if (param.schema?.type === "boolean") {
       return (
@@ -339,16 +650,24 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     if (schema.type === "object" && schema.properties) {
       const result: any = {};
       Object.entries(schema.properties).forEach(([key, propSchema]: [string, any]) => {
-        const value = formData[key];
-        if (value !== undefined && value !== "") {
-          if (propSchema.type === "number" || propSchema.type === "integer") {
-            result[key] = Number(value);
-          } else if (propSchema.type === "boolean") {
-            result[key] = value === "true" || value === true;
-          } else if (propSchema.type === "object" && propSchema.properties) {
-            result[key] = formDataToJSON(formData, propSchema);
-          } else {
-            result[key] = value;
+        // Special handling for parameters field - use the dynamic schema
+        if (key === "parameters" && parametersSchema) {
+          const parametersValue = extractNestedFormData(formData, "parameters", parametersSchema);
+          if (Object.keys(parametersValue).length > 0) {
+            result[key] = parametersValue;
+          }
+        } else {
+          const value = formData[key];
+          if (value !== undefined && value !== "") {
+            if (propSchema.type === "number" || propSchema.type === "integer") {
+              result[key] = Number(value);
+            } else if (propSchema.type === "boolean") {
+              result[key] = value === "true" || value === true;
+            } else if (propSchema.type === "object" && propSchema.properties) {
+              result[key] = formDataToJSON(formData, propSchema);
+            } else {
+              result[key] = value;
+            }
           }
         }
       });
@@ -356,6 +675,30 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     }
     
     return formData;
+  };
+
+  const extractNestedFormData = (formData: Record<string, any>, basePath: string, schema: any): any => {
+    if (!schema || !schema.properties) return {};
+    
+    const result: any = {};
+    Object.entries(schema.properties).forEach(([key, propSchema]: [string, any]) => {
+      const fullPath = `${basePath}.${key}`;
+      const value = formData[fullPath];
+      
+      if (value !== undefined && value !== "") {
+        if (propSchema.type === "number" || propSchema.type === "integer") {
+          result[key] = Number(value);
+        } else if (propSchema.type === "boolean") {
+          result[key] = value === "true" || value === true;
+        } else if (propSchema.type === "object" && propSchema.properties) {
+          result[key] = extractNestedFormData(formData, fullPath, propSchema);
+        } else {
+          result[key] = value;
+        }
+      }
+    });
+    
+    return result;
   };
 
   const renderResponseField = (key: string, value: any, schema: any, path: string = "", isRoot: boolean = false) => {
@@ -585,6 +928,106 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
 
   const renderFormField = (key: string, schema: any, path: string = "") => {
     const value = formData[path] || "";
+    
+    // Special handling for browser_cdp_url field
+    if (key === "browser_cdp_url") {
+      return (
+        <div className="space-y-2">
+          <Input
+            type="text"
+            value={value}
+            onChange={(e) => setFormData(prev => ({ ...prev, [path]: e.target.value }))}
+            placeholder={schema.description || key}
+            className="font-mono text-sm"
+          />
+          {value && (
+            <div className="text-xs text-gray-500">
+              Auto-populated from current browser session
+            </div>
+          )}
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={async () => {
+              const cdpUrl = await getCurrentBrowserCdpUrl();
+              if (cdpUrl) {
+                setFormData(prev => ({ ...prev, [path]: cdpUrl }));
+              }
+            }}
+            className="w-full"
+          >
+            Refresh from Current Browser
+          </Button>
+        </div>
+      );
+    }
+    
+    // Special handling for parameters field - render as dynamic JSON form
+    if (key === "parameters") {
+      return (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-medium">
+              Parameters (from task arguments)
+            </Label>
+            {formData.task_id && (
+              <span className="text-xs text-gray-500">
+                Task ID: {formData.task_id}
+              </span>
+            )}
+          </div>
+          
+          {parametersSchemaLoading ? (
+            <div className="text-sm text-gray-500 p-2">Loading task arguments schema...</div>
+          ) : parametersSchema ? (
+            <div className="space-y-3 border border-gray-200 rounded p-3">
+              {Object.entries(parametersSchema.properties).map(([propKey, propSchema]: [string, any]) => (
+                <div key={propKey} className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Label className="text-xs font-medium">
+                      {propKey}
+                    </Label>
+                    <span className="text-xs text-gray-500">({(propSchema as any).type})</span>
+                  </div>
+                  {renderFormField(propKey, propSchema, `${path}.${propKey}`)}
+                </div>
+              ))}
+            </div>
+          ) : formData.task_id ? (
+            <div className="text-sm text-gray-500 p-2">
+              No arguments schema found for task {formData.task_id}
+            </div>
+          ) : (
+            <div className="text-sm text-gray-500 p-2">
+              Select a task ID to load arguments schema
+            </div>
+          )}
+          
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={async () => {
+              if (formData.task_id) {
+                setParametersSchemaLoading(true);
+                try {
+                  const schema = await getTaskArgumentsSchema(formData.task_id);
+                  setParametersSchema(schema);
+                } catch (err) {
+                  console.error("Failed to refresh parameters schema:", err);
+                } finally {
+                  setParametersSchemaLoading(false);
+                }
+              }
+            }}
+            className="w-full"
+            disabled={!formData.task_id}
+          >
+            Refresh Parameters Schema
+          </Button>
+        </div>
+      );
+    }
+    
     if (schema.type === "object" && schema.properties) {
       return (
         <div className="space-y-4">
@@ -630,6 +1073,75 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
               {renderFormField(`${key}[0]`, schema.items, `${path}[0]`)}
             </div>
           )}
+        </div>
+      );
+    } else if (key === "task_id") {
+      return (
+        <div className="space-y-2">
+          <Tabs value={taskIdMode} onValueChange={(value) => setTaskIdMode(value as "dropdown" | "raw")}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="dropdown">Select Task</TabsTrigger>
+              <TabsTrigger value="raw">Raw ID</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="dropdown" className="mt-2">
+              {tasksLoading ? (
+                <div className="text-sm text-gray-500 p-2">Loading tasks...</div>
+              ) : tasksError ? (
+                <div className="text-sm text-red-500 p-2">{tasksError}</div>
+              ) : (
+                <Select value={String(value)} onValueChange={(v) => {
+                  setFormData(prev => ({ ...prev, [path]: v }));
+                  // Also update parameters if this is in parameters
+                  setParameters(prev => ({ ...prev, task_id: v }));
+                }}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a task" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {tasks.length === 0 ? (
+                      <SelectItem value="1" disabled>
+                        No tasks available (using ID: 1)
+                      </SelectItem>
+                    ) : (
+                      tasks.map((task) => (
+                        <SelectItem key={task.id} value={String(task.id)}>
+                          <div className="flex flex-col">
+                            <span className="font-medium">{task.name}</span>
+                            <span className="text-xs text-gray-500">
+                              ID: {task.id} • {task.task_type} • {task.status}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              )}
+            </TabsContent>
+            
+            <TabsContent value="raw" className="mt-2">
+              <Input
+                type="number"
+                value={String(value || "1")}
+                onChange={(e) => {
+                  setFormData(prev => ({ ...prev, [path]: e.target.value }));
+                  // Also update parameters if this is in parameters
+                  setParameters(prev => ({ ...prev, task_id: e.target.value }));
+                }}
+                placeholder="Enter task ID"
+                min="1"
+              />
+            </TabsContent>
+          </Tabs>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={fetchTasks}
+            className="w-full"
+          >
+            Refresh Tasks
+          </Button>
         </div>
       );
     } else if (schema.enum) {
@@ -727,6 +1239,25 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
 
   return (
     <div className="flex flex-col h-full bg-[var(--gray-2)]">
+      {/* Task Running Status */}
+      {currentRunId && (
+        <div className="p-4 border-b border-[var(--gray-6)] bg-black">
+          <SessionRunningStatus 
+            runId={currentRunId}
+            onComplete={(result) => {
+              console.log("Task completed:", result);
+              // Optionally clear the run ID or keep it for review
+            }}
+            onError={(error) => {
+              console.error("Task failed:", error);
+            }}
+            onClose={() => {
+              setCurrentRunId(null);
+            }}
+          />
+        </div>
+      )}
+      
       <div className="p-4 border-b border-[var(--gray-6)]">
         <div className="flex gap-4 items-end">
           <div className="flex-1">

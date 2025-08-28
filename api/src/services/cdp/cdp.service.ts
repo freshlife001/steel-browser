@@ -128,7 +128,7 @@ export class CDPService extends EventEmitter {
     this.currentSessionConfig = null;
     this.shuttingDown = false;
     this.defaultLaunchConfig = {
-      options: { headless: env.CHROME_HEADLESS, args: [] },
+      options: { headless: env.CHROME_HEADLESS, proxyUrl: env.PROXY_URL, args: [] },
       blockAds: true,
       extensions: [],
     };
@@ -623,6 +623,7 @@ export class CDPService extends EventEmitter {
       const launchProcess = (async () => {
         const shouldReuseInstance =
           this.browserInstance &&
+          !env.CDP_UPSTEAM_URL &&
           this.isDefaultConfig(config) &&
           this.isDefaultConfig(this.launchConfig);
 
@@ -795,7 +796,7 @@ export class CDPService extends EventEmitter {
 
         const dynamicArgs = [
           this.launchConfig.dimensions ? "" : "--start-maximized",
-          `--remote-debugging-address=${env.HOST}`,
+          `--remote-debugging-address=${env.CDP_REDIRECT_HOST}`,
           "--remote-debugging-port=9222",
           `--unsafely-treat-insecure-origin-as-secure=http://localhost:3000,http://${env.HOST}:${env.PORT}`,
           `--window-size=${this.launchConfig.dimensions?.width ?? 1920},${
@@ -848,6 +849,11 @@ export class CDPService extends EventEmitter {
           this.browserInstance = (await tracer.startActiveSpan(
             "CDPService.launchBrowser",
             async () => {
+              if (env.CDP_UPSTEAM_URL) {
+                return await puppeteer.connect({
+                  browserURL: env.CDP_UPSTEAM_URL,
+                });
+              }
               return await puppeteer.launch(finalLaunchOptions);
             },
           )) as unknown as Browser;
@@ -880,7 +886,11 @@ export class CDPService extends EventEmitter {
         });
 
         try {
+          this.logger.info(`[CDPService] get primaryPage current ${this.primaryPage}`);
           this.primaryPage = (await this.browserInstance.pages())[0];
+          if (!this.primaryPage) {
+            await this.refreshPrimaryPage();
+          }
         } catch (error) {
           throw new BrowserProcessError(
             "Failed to get primary page from browser instance",
@@ -957,6 +967,7 @@ export class CDPService extends EventEmitter {
 
   @traceable
   public async proxyWebSocket(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    this.logger.info("[CDPService] proxyWebSocket");
     if (this.proxyWebSocketHandler) {
       this.logger.info("[CDPService] Using custom WebSocket proxy handler");
       await this.proxyWebSocketHandler(req, socket, head);
@@ -985,6 +996,17 @@ export class CDPService extends EventEmitter {
     this.browserInstance?.once("disconnected", cleanupListeners);
     socket.once("close", cleanupListeners);
     socket.once("error", cleanupListeners);
+
+    try {
+      if (this.browserInstance) {
+        this.primaryPage = (await this.browserInstance!.pages())[0];
+        if (!this.primaryPage) {
+          await this.refreshPrimaryPage();
+        }
+      }
+    } catch (error) {
+      this.logger.error("[CDPService] failed to refreshPrimaryPage");
+    }
 
     // Increase max listeners
     if (this.browserInstance?.process()) {
