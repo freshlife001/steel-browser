@@ -183,7 +183,8 @@ export class CDPService extends EventEmitter {
   }
 
   private getDebuggerBase(): { baseUrl: string; protocol: string; wsProtocol: string } {
-    const baseUrl = env.CDP_DOMAIN ?? env.DOMAIN ?? `${env.HOST}:${env.CDP_REDIRECT_PORT}`;
+    const baseUrl =
+      env.CDP_DOMAIN ?? env.DOMAIN ?? `${env.CDP_REDIRECT_HOST}:${env.CDP_REDIRECT_PORT}`;
     const protocol = env.USE_SSL ? "https" : "http";
     const wsProtocol = env.USE_SSL ? "wss" : "ws";
     return { baseUrl, protocol, wsProtocol };
@@ -191,7 +192,7 @@ export class CDPService extends EventEmitter {
 
   public getDebuggerUrl() {
     const { baseUrl, protocol } = this.getDebuggerBase();
-    return `${protocol}://${baseUrl}/devtools/devtools_app.html`;
+    return `${protocol}://${baseUrl}/devtools/`;
   }
 
   public getDebuggerWsUrl(pageId?: string) {

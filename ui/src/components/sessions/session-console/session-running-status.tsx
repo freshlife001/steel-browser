@@ -15,6 +15,9 @@ interface TaskAction {
   completed_at?: string;
   created_at: string;
   updated_at: string;
+  progress?: number; // 0-100
+  current_step?: string;
+  token_summary?: Record<string, number | string>;
 }
 
 interface SessionRunningStatusProps {
@@ -234,6 +237,60 @@ export default function SessionRunningStatus({ runId, onComplete, onError, onClo
                 <div className="font-mono text-xs">{taskAction.id}</div>
               </div>
             </div>
+
+            {/* Progress */}
+            {(taskAction.progress !== undefined || taskAction.current_step) && (
+              <div className="space-y-2">
+                <div className="font-medium text-gray-700 text-sm">Progress:</div>
+                
+                {/* Progress Bar */}
+                {taskAction.progress !== undefined && (
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span>Progress</span>
+                      <span>{taskAction.progress}%</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div 
+                        className={`h-2 rounded-full transition-all duration-300 ${
+                          taskAction.status === "completed" ? "bg-green-500" :
+                          taskAction.status === "failed" ? "bg-red-500" :
+                          taskAction.status === "running" ? "bg-blue-500" : "bg-gray-400"
+                        }`}
+                        style={{ width: `${Math.min(Math.max(taskAction.progress, 0), 100)}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Current Step */}
+                {taskAction.current_step && (
+                  <div className="text-xs">
+                    <span className="text-gray-500">Current Step:</span>
+                    <div className="font-medium ml-1">{taskAction.current_step}</div>
+                  </div>
+                )}
+
+                {/* Token Summary */}
+                {taskAction.token_summary && Object.keys(taskAction.token_summary).length > 0 && (
+                  <div className="text-xs">
+                    <span className="text-gray-500">Token Usage:</span>
+                    <div className="grid grid-cols-2 gap-1 mt-1">
+                      {Object.entries(taskAction.token_summary)
+                        .filter(([, value]) => typeof value === 'number' || typeof value === 'string')
+                        .map(([key, value]) => (
+                          <div key={key} className="flex justify-between">
+                            <span className="text-gray-600 capitalize">{key.replace(/_/g, ' ')}:</span>
+                            <span className="font-medium text-purple-600">
+                              {typeof value === 'number' ? parseFloat(value.toFixed(3)) : value}
+                            </span>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Timeline */}
             <div className="space-y-2">

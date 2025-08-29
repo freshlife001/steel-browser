@@ -27,7 +27,7 @@ export default function SessionDevTools() {
 
   return (
     <iframe
-      src={`${env.VITE_API_URL}/v1/devtools/inspector.html${
+      src={`${env.VITE_API_URL}/v1/devtools/devtools_app.html${
         pageId ? `?pageId=${pageId}` : ""
       }`}
       className="w-full h-full"
