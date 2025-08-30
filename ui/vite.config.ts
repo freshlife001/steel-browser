@@ -12,6 +12,11 @@ export default defineConfig({
     },
   },
   server: {
+    allowedHosts: [
+      'playground.browser.ihuaj.com',
+      'localhost',
+      '127.0.0.1'
+    ],
     proxy: {
       "/api": {
         target: "http://localhost:3000",
