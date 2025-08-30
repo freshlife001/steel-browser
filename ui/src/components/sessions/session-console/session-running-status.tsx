@@ -48,7 +48,7 @@ export default function SessionRunningStatus({ runId, onComplete, onError, onClo
       setLoading(true);
       setError(null);
       
-      const response = await fetch(`${env.AUTOMATION_API_URL}/api/v1/tasks/actions/${runId}`);
+      const response = await fetch(`${env.VITE_AUTOMATION_API_URL}/api/v1/tasks/actions/${runId}`);
       if (!response.ok) {
         throw new Error(`Failed to fetch task status: ${response.status}`);
       }

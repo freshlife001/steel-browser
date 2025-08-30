@@ -108,7 +108,7 @@ export const handleGetSessionDetails = async (
 
   const session = server.sessionService.activeSession;
   const duration = new Date().getTime() - new Date(session.createdAt).getTime();
-  console.log("duration", duration);
+  //console.log("duration", duration);
   return reply.send({
     ...session,
     duration,

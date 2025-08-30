@@ -145,7 +145,7 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${env.AUTOMATION_API_URL}/openapi.json`);
+      const response = await fetch(`${env.VITE_AUTOMATION_API_URL}/openapi.json`);
       if (!response.ok) {
         throw new Error(`Failed to fetch OpenAPI schema: ${response.status}`);
       }
@@ -177,7 +177,7 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     setTasksLoading(true);
     setTasksError(null);
     try {
-      const response = await fetch(`${env.AUTOMATION_API_URL}/api/v1/tasks`);
+      const response = await fetch(`${env.VITE_AUTOMATION_API_URL}/api/v1/tasks`);
       if (!response.ok) {
         throw new Error(`Failed to fetch tasks: ${response.status}`);
       }
@@ -195,12 +195,12 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     if (!id) return "ws://localhost:3000";
     
     try {
-      const response = await fetch(`${env.VITE_API_URL}/sessions/${id}`);
+      const response = await fetch(`${env.VITE_API_URL}/v1/sessions/${id}`);
       if (!response.ok) {
         return "ws://localhost:3000";
       }
       const data = await response.json();
-      return data.browser?.cdpUrl || data.cdpUrl || "ws://localhost:3000";
+      return data.websocketUrl || "ws://localhost:3000";
     } catch (err) {
       console.error("Failed to fetch browser CDP URL:", err);
       return "ws://localhost:3000";
@@ -221,7 +221,7 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     if (!taskId) return null;
     
     try {
-      const response = await fetch(`${env.AUTOMATION_API_URL}/api/v1/tasks/${taskId}`);
+      const response = await fetch(`${env.VITE_AUTOMATION_API_URL}/api/v1/tasks/${taskId}`);
       if (!response.ok) {
         return null;
       }
@@ -479,7 +479,7 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     setResponseLoading(true);
     try {
       // Build URL with query parameters
-      let url = `${env.AUTOMATION_API_URL}${selectedEndpoint}`;
+      let url = `${env.VITE_AUTOMATION_API_URL}${selectedEndpoint}`;
       const queryParams = new URLSearchParams();
       
       // Add parameters
