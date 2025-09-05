@@ -149,20 +149,18 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
 
   const loadLastRequest = () => {
     try {
-      // Load method-specific last request
-      const storageKey = `lastRequest_${selectedMethod}`;
+      // Load endpoint + method + task_id specific last request
+      const taskId = parameters.task_id || '';
+      const storageKey = `lastRequest_${selectedMethod}_${selectedEndpoint.replace(/[^a-zA-Z0-9]/g, '_')}${taskId ? `_${taskId}` : ''}`;
       const lastRequestData = localStorage.getItem(storageKey);
       
       if (lastRequestData) {
         const requestData = JSON.parse(lastRequestData);
         
-        // Only restore if the method matches (for safety)
-        if (requestData.method === selectedMethod) {
-          // Restore endpoint
-          if (requestData.endpoint) {
-            setSelectedEndpoint(requestData.endpoint);
-          }
-          
+        // Only restore if method, endpoint, and task_id match (for safety)
+        if (requestData.method === selectedMethod && 
+            requestData.endpoint === selectedEndpoint && 
+            (!requestData.taskId || requestData.taskId === taskId)) {
           // Restore parameters
           if (requestData.parameters) {
             setParameters(requestData.parameters);
@@ -624,17 +622,19 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
         options.body = finalRequestBody;
       }
 
-      // Save request data to localStorage before sending (method-specific)
+      // Save request data to localStorage before sending (endpoint + method + task_id specific)
+      const taskId = parameters.task_id || '';
       const requestData = {
         endpoint: selectedEndpoint,
         method: selectedMethod,
+        taskId,
         parameters,
         requestBody: finalRequestBody,
         requestBodyMode,
         formData,
         timestamp: new Date().toISOString()
       };
-      const storageKey = `lastRequest_${selectedMethod}`;
+      const storageKey = `lastRequest_${selectedMethod}_${selectedEndpoint.replace(/[^a-zA-Z0-9]/g, '_')}${taskId ? `_${taskId}` : ''}`;
       localStorage.setItem(storageKey, JSON.stringify(requestData));
 
       // Add path parameters
