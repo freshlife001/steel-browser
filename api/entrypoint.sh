@@ -121,8 +121,11 @@ main() {
     start_nginx || exit 1
     
     # Set required environment variables
-    export CDP_REDIRECT_PORT=9223
+    # export CDP_REDIRECT_PORT=9223
     export DISPLAY=:10
+    export CDP_REDIRECT_HOST=127.0.0.1
+    export CDP_REDIRECT_PORT=8001
+    export SKIP_FINGERPRINT_INJECTION=true
     
     # Log environment state
     log "Environment configuration:"

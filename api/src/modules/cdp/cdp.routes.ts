@@ -6,6 +6,48 @@ import { fetch } from "undici";
 
 async function routes(server: FastifyInstance) {
   server.all(
+    "/json/*",
+    {
+      schema: {
+        operationId: "proxyJsonRequests",
+        description: "Proxy JSON requests to the upstream CDP service",
+        tags: ["CDP"],
+        summary: "Proxy JSON requests",
+      },
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const upstreamUrl = process.env.CDP_UPSTEAM_URL;
+      if (!upstreamUrl) {
+        return reply.status(500).send("CDP_UPSTEAM_URL not configured");
+      }
+
+      const originalPath = request.url;
+      const targetUrl = `${upstreamUrl}${originalPath.replace("/v1/json/", "/json/")}`;
+
+      try {
+        const response = await fetch(targetUrl, {
+          method: request.method,
+          headers: {
+            "User-Agent": request.headers["user-agent"] || "",
+            Accept: request.headers.accept || "*/*",
+            "Content-Type": request.headers["content-type"] || "",
+          },
+          body: request.body as any,
+        });
+
+        reply.status(response.status);
+        reply.type(response.headers.get("content-type") || "application/json");
+
+        const body = await response.text();
+        return reply.send(body);
+      } catch (error) {
+        server.log.error(`JSON proxy error: ${error}`);
+        return reply.status(500).send("JSON proxy error");
+      }
+    },
+  );
+
+  server.all(
     "/devtools/*",
     {
       schema: {

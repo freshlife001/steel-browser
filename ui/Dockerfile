@@ -13,6 +13,9 @@ COPY --link ui/ ./ui/
 # Install the npm packages directly in the Docker container's working directory
 RUN npm ci --include=dev -w ui --ignore-scripts
 
+ARG VITE_AUTOMATION_API_URL
+ENV VITE_AUTOMATION_API_URL=${VITE_AUTOMATION_API_URL}
+
 # Build the application
 RUN npm run build -w ui
 

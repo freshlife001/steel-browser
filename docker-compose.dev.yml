@@ -11,6 +11,7 @@ services:
     environment:
       - DOMAIN=${DOMAIN:-localhost:3000}
       - CDP_DOMAIN=${CDP_DOMAIN:-localhost:9223}
+      - CDP_UPSTEAM_URL=${CDP_UPSTEAM_URL:-http://172.17.0.1:8001}
     volumes:
       - ./.cache:/app/.cache
     networks:
@@ -20,6 +21,8 @@ services:
     build:
       context: .
       dockerfile: ./ui/Dockerfile
+      args:
+        VITE_AUTOMATION_API_URL: ${VITE_AUTOMATION_API_URL:-http://172.17.0.1:8000}
     ports:
       - "5173:80"
     environment:
