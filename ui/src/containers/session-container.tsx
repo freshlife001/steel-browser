@@ -1,9 +1,9 @@
 import SessionConsole from "@/components/sessions/session-console";
-import { SessionViewer } from "@/components/sessions/session-viewer";
+import { SessionViewer, type SessionViewerRef } from "@/components/sessions/session-viewer";
 import { Button } from "@/components/ui/button";
 import { useSessionsContext } from "@/hooks/use-sessions-context";
-import { ArrowLeftIcon, ArrowRightIcon } from "@radix-ui/react-icons";
-import { useState } from "react";
+import { ArrowLeftIcon, ArrowRightIcon, ReloadIcon } from "@radix-ui/react-icons";
+import { useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 
 export function SessionContainer() {
@@ -12,6 +12,11 @@ export function SessionContainer() {
   const { useSession } = useSessionsContext();
   const { data: session, isLoading, isError } = useSession(id!);
   const [showConsole, setShowConsole] = useState(true);
+  const sessionViewerRef = useRef<SessionViewerRef>(null);
+
+  const handleReload = () => {
+    sessionViewerRef.current?.reload();
+  };
   if (isLoading) return <div>Loading...</div>;
   if (isError || !session) return <div>Error</div>;
 
@@ -24,18 +29,28 @@ export function SessionContainer() {
               showConsole ? "w-2/3" : "w-full"
             }`}
           >
-            <Button
-              variant="secondary"
-              onClick={() => setShowConsole(!showConsole)}
-              className="text-primary bg-[var(--gray-3)] ml-auto px-3 rounded-lg absolute top-2 right-2"
-            >
-              {showConsole ? (
-                <ArrowRightIcon className="w-4 h-4" />
-              ) : (
-                <ArrowLeftIcon className="w-4 h-4" />
-              )}
-            </Button>
-            <SessionViewer id={id!} />
+            <div className="flex gap-2 ml-auto px-3 rounded-lg absolute top-2 right-2">
+              <Button
+                variant="secondary"
+                onClick={handleReload}
+                className="text-primary bg-[var(--gray-3)] px-3 rounded-lg"
+                title="Reload iframe"
+              >
+                <ReloadIcon className="w-4 h-4" />
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setShowConsole(!showConsole)}
+                className="text-primary bg-[var(--gray-3)] px-3 rounded-lg"
+              >
+                {showConsole ? (
+                  <ArrowRightIcon className="w-4 h-4" />
+                ) : (
+                  <ArrowLeftIcon className="w-4 h-4" />
+                )}
+              </Button>
+            </div>
+            <SessionViewer ref={sessionViewerRef} id={id!} />
           </div>
           {showConsole && (
             <div className="flex flex-col items-center overflow-hidden w-1/3 justify-center h-full text-primary gap-2">

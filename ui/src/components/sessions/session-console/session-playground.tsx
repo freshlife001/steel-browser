@@ -56,6 +56,72 @@ interface SessionPlaygroundProps {
   onRunStart?: (runId: string) => void;
 }
 
+// Reusable JSON Editor Field Component
+interface JsonEditorFieldProps {
+  label: string;
+  value: any;
+  onChange: (value: any) => void;
+  placeholder: string;
+  description: string;
+  path: string;
+}
+
+const JsonEditorField: React.FC<JsonEditorFieldProps> = ({ 
+  label, 
+  value, 
+  onChange, 
+  placeholder, 
+  description 
+}) => {
+  return (
+    <div className="space-y-2">
+      <Label className="text-sm font-medium">
+        {label}
+      </Label>
+      <Textarea
+        value={typeof value === 'string' ? value : JSON.stringify(value, null, 2)}
+        onChange={(e) => {
+          try {
+            const parsedValue = JSON.parse(e.target.value);
+            onChange(parsedValue);
+          } catch {
+            // Allow invalid JSON during typing
+            onChange(e.target.value);
+          }
+        }}
+        placeholder={placeholder}
+        className="font-mono text-sm min-h-[120px]"
+      />
+      {typeof value === 'string' && value.trim() && (
+        <div className="text-xs text-red-500">
+          Invalid JSON format. Please enter a valid JSON object.
+        </div>
+      )}
+      <div className="text-xs text-gray-500">
+        {description}
+      </div>
+    </div>
+  );
+};
+
+// Helper function to handle JSON field conversion
+const handleJsonField = (value: any, fieldName: string): any => {
+  if (value !== undefined && value !== "") {
+    if (typeof value === 'string') {
+      try {
+        return JSON.parse(value);
+      } catch {
+        // If invalid JSON, don't include in result
+        console.warn(`Invalid JSON in ${fieldName} field:`, value);
+        return undefined;
+      }
+    } else {
+      return value;
+    }
+  }
+  return undefined;
+};
+
 export default function SessionPlayground({ id }: SessionPlaygroundProps) {
   // Session ID can be used to auto-populate session-related parameters in the future
   console.log('Session ID:', id);
@@ -80,6 +146,52 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
   const [parametersSchema, setParametersSchema] = useState<any>(null);
   const [parametersSchemaLoading, setParametersSchemaLoading] = useState(false);
   const [currentRunId, setCurrentRunId] = useState<string | null>(null);
+
+  const loadLastRequest = () => {
+    try {
+      // Load method-specific last request
+      const storageKey = `lastRequest_${selectedMethod}`;
+      const lastRequestData = localStorage.getItem(storageKey);
+      
+      if (lastRequestData) {
+        const requestData = JSON.parse(lastRequestData);
+        
+        // Only restore if the method matches (for safety)
+        if (requestData.method === selectedMethod) {
+          // Restore endpoint
+          if (requestData.endpoint) {
+            setSelectedEndpoint(requestData.endpoint);
+          }
+          
+          // Restore parameters
+          if (requestData.parameters) {
+            setParameters(requestData.parameters);
+          }
+          
+          // Restore request body
+          if (requestData.requestBody !== undefined) {
+            setRequestBody(requestData.requestBody || '');
+          }
+          
+          // Restore form data
+          if (requestData.formData) {
+            setFormData(requestData.formData);
+          }
+          
+          // Restore request body mode
+          if (requestData.requestBodyMode) {
+            setRequestBodyMode(requestData.requestBodyMode);
+          }
+          
+          return true;
+        }
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to load last request:', error);
+      return false;
+    }
+  };
 
   useEffect(() => {
     fetchOpenAPISchema();
@@ -410,6 +522,9 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
             // Handle parameters field with dynamic schema
             const nestedFormData = jsonToNestedFormData(json[key] || {}, parametersSchema || {}, "parameters");
             Object.assign(result, nestedFormData);
+          } else if (key === "arguments" || key === "response_json_schema") {
+            // Handle JSON dictionary fields as formatted strings
+            result[key] = typeof json[key] === 'object' ? JSON.stringify(json[key], null, 2) : json[key];
           } else if (propSchema.type === "object" && propSchema.properties) {
             result[key] = jsonToFormData(json[key], propSchema);
           } else {
@@ -508,6 +623,19 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
       if (['POST', 'PUT', 'PATCH'].includes(selectedMethod) && finalRequestBody) {
         options.body = finalRequestBody;
       }
+
+      // Save request data to localStorage before sending (method-specific)
+      const requestData = {
+        endpoint: selectedEndpoint,
+        method: selectedMethod,
+        parameters,
+        requestBody: finalRequestBody,
+        requestBodyMode,
+        formData,
+        timestamp: new Date().toISOString()
+      };
+      const storageKey = `lastRequest_${selectedMethod}`;
+      localStorage.setItem(storageKey, JSON.stringify(requestData));
 
       // Add path parameters
       let finalUrl = url;
@@ -655,6 +783,13 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
           const parametersValue = extractNestedFormData(formData, "parameters", parametersSchema);
           if (Object.keys(parametersValue).length > 0) {
             result[key] = parametersValue;
+          }
+        } 
+        // Special handling for JSON dictionary fields
+        else if (key === "arguments" || key === "response_json_schema") {
+          const processedValue = handleJsonField(formData[key], key);
+          if (processedValue !== undefined) {
+            result[key] = processedValue;
           }
         } else {
           const value = formData[key];
@@ -959,6 +1094,33 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
             Refresh from Current Browser
           </Button>
         </div>
+      );
+    }
+    
+    // Special handling for JSON dictionary fields
+    if (key === "arguments") {
+      return (
+        <JsonEditorField
+          label="Arguments (JSON dictionary)"
+          value={value}
+          onChange={(newValue) => setFormData(prev => ({ ...prev, [path]: newValue }))}
+          placeholder={`Enter JSON arguments, e.g., {\n  "param1": "int",\n  "param2": "string"\n}`}
+          description="Enter a JSON object with key-value pairs for the task arguments."
+          path={path}
+        />
+      );
+    }
+    
+    if (key === "response_json_schema") {
+      return (
+        <JsonEditorField
+          label="Response JSON Schema (JSON dictionary)"
+          value={value}
+          onChange={(newValue) => setFormData(prev => ({ ...prev, [path]: newValue }))}
+          placeholder={`Enter JSON schema, e.g., {\n  "type": "object",\n  "properties": {\n    "name": { "type": "string" }\n  }\n}`}
+          description="Enter a JSON schema object defining the expected response structure."
+          path={path}
+        />
       );
     }
     
@@ -1343,10 +1505,55 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
             {['POST', 'PUT', 'PATCH'].includes(selectedMethod) && endpointDetails.requestBody && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-sm">Request Body</CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-sm">Request Body</CardTitle>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={loadLastRequest}
+                      className="text-xs"
+                    >
+                      Load Last Request
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent>
-                  <Tabs value={requestBodyMode} onValueChange={(value) => setRequestBodyMode(value as "raw" | "form")}>
+                  <Tabs value={requestBodyMode} onValueChange={(value) => {
+                    const newMode = value as "raw" | "form";
+                    
+                    // When switching from form to raw, convert form data to raw JSON
+                    if (newMode === "raw" && requestBodyMode === "form") {
+                      const endpointDetails = getEndpointDetails();
+                      if (endpointDetails?.requestBody?.content?.['application/json']?.schema) {
+                        const requestBodySchema = endpointDetails.requestBody.content['application/json'].schema;
+                        const resolvedSchema = requestBodySchema ? resolveSchemaRef(requestBodySchema, schema) : null;
+                        const jsonData = formDataToJSON(formData, resolvedSchema);
+                        const rawJsonString = JSON.stringify(jsonData, null, 2);
+                        setRequestBody(rawJsonString);
+                        setRequestBodyError(null);
+                      }
+                    }
+                    
+                    // When switching from raw to form, parse raw JSON and populate form data
+                    if (newMode === "form" && requestBodyMode === "raw") {
+                      const endpointDetails = getEndpointDetails();
+                      if (endpointDetails?.requestBody?.content?.['application/json']?.schema && requestBody.trim()) {
+                        try {
+                          const parsedJson = JSON.parse(requestBody);
+                          const requestBodySchema = endpointDetails.requestBody.content['application/json'].schema;
+                          const resolvedSchema = requestBodySchema ? resolveSchemaRef(requestBodySchema, schema) : null;
+                          const newFormData = jsonToFormData(parsedJson, resolvedSchema);
+                          setFormData(newFormData);
+                          setRequestBodyError(null);
+                        } catch (error) {
+                          console.warn('Failed to parse JSON when switching to form mode:', error);
+                          setRequestBodyError("Invalid JSON format - cannot switch to form mode");
+                        }
+                      }
+                    }
+                    
+                    setRequestBodyMode(newMode);
+                  }}>
                     <TabsList className="grid w-full grid-cols-2">
                       <TabsTrigger value="raw">Raw JSON</TabsTrigger>
                       <TabsTrigger value="form">Form</TabsTrigger>

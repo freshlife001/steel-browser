@@ -1,7 +1,11 @@
 import { useSessionsContext } from "@/hooks/use-sessions-context";
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from "react";
 import "./session-viewer-controls.css";
 import { LoadingSpinner } from "@/components/icons/LoadingSpinner";
+
+export interface SessionViewerRef {
+  reload: () => void;
+}
 
 type SessionViewerProps = {
   id: string;
@@ -9,7 +13,7 @@ type SessionViewerProps = {
 
 let clipboardBridgeActive = false;
 
-export function SessionViewer({ id }: SessionViewerProps) {
+export const SessionViewer = forwardRef<SessionViewerRef, SessionViewerProps>(({ id }, ref) => {
   const { useSession } = useSessionsContext();
   const {
     data: session,
@@ -19,6 +23,24 @@ export function SessionViewer({ id }: SessionViewerProps) {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  // Reload function for the iframe
+  const reloadIframe = useCallback(() => {
+    if (iframeRef.current) {
+      const currentSrc = iframeRef.current.src;
+      iframeRef.current.src = '';
+      setTimeout(() => {
+        if (iframeRef.current) {
+          iframeRef.current.src = currentSrc;
+        }
+      }, 10);
+    }
+  }, []);
+
+  // Expose reload function to parent component
+  useImperativeHandle(ref, () => ({
+    reload: reloadIframe,
+  }), [reloadIframe]);
 
   // Clipboard bridge message handler
   const handleMessage = useCallback(async (event: MessageEvent) => {
@@ -192,4 +214,4 @@ export function SessionViewer({ id }: SessionViewerProps) {
       />
     </div>
   );
-}
+});
