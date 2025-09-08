@@ -1,0 +1,1 @@
+VITE_AUTOMATION_API_URL=http://automator-api.browser.ihuaj.com DOMAIN=playground-api.browser.ihuaj.com CDP_UPSTEAM_URL=http://10.89.0.1:8001  docker compose -f docker-compose.dev.yml up --build
