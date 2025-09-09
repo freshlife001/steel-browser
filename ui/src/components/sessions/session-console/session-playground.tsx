@@ -214,7 +214,27 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     };
     
     autoPopulateBrowserCdpUrl();
-  }, [selectedEndpoint, selectedMethod, schema, formData.browser_cdp_url]);
+  }, [selectedEndpoint, selectedMethod, schema]);
+
+  // Auto-populate target_url in request body when task_id changes
+  useEffect(() => {
+    const autoPopulateTargetUrl = async () => {
+      if (formData.task_id && selectedEndpoint && selectedMethod && schema && ['POST', 'PUT', 'PATCH'].includes(selectedMethod)) {
+        const endpointDetails = schema.paths[selectedEndpoint]?.[selectedMethod.toLowerCase()];
+        if (endpointDetails?.requestBody?.content?.['application/json']?.schema) {
+          const requestBodySchema = resolveSchemaRef(endpointDetails.requestBody.content['application/json'].schema, schema);
+          if (hasTargetUrlField(requestBodySchema)) {
+            const { defaultTargetUrl } = await getTaskData(formData.task_id);
+            if (defaultTargetUrl) {
+              setFormData(prev => ({ ...prev, target_url: defaultTargetUrl }));
+            }
+          }
+        }
+      }
+    };
+    
+    autoPopulateTargetUrl();
+  }, [formData.task_id, selectedEndpoint, selectedMethod, schema]);
 
   // Update parameters schema when task_id changes in form data
   useEffect(() => {
@@ -222,8 +242,8 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
       if (formData.task_id) {
         setParametersSchemaLoading(true);
         try {
-          const schema = await getTaskArgumentsSchema(formData.task_id);
-          setParametersSchema(schema);
+          const { argumentsSchema } = await getTaskData(formData.task_id);
+          setParametersSchema(argumentsSchema);
         } catch (err) {
           console.error("Failed to update parameters schema:", err);
           setParametersSchema(null);
@@ -327,22 +347,37 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
     return false;
   };
 
-  const getTaskArgumentsSchema = async (taskId: string): Promise<any> => {
-    if (!taskId) return null;
+  const hasTargetUrlField = (schema: any): boolean => {
+    if (!schema) return false;
+    
+    if (schema.type === "object" && schema.properties) {
+      return "target_url" in schema.properties;
+    }
+    
+    return false;
+  };
+
+  const getTaskData = async (taskId: string): Promise<{ argumentsSchema: any; defaultTargetUrl: string }> => {
+    if (!taskId) return { argumentsSchema: null, defaultTargetUrl: "" };
     
     try {
       const response = await fetch(`${env.VITE_AUTOMATION_API_URL}/api/v1/tasks/${taskId}`);
       if (!response.ok) {
-        return null;
+        return { argumentsSchema: null, defaultTargetUrl: "" };
       }
       const data = await response.json();
       
       // Extract the arguments field and infer schema from its structure
       const taskArguments = data.arguments || {};
-      return generateSchemaFromArguments(taskArguments);
+      const argumentsSchema = generateSchemaFromArguments(taskArguments);
+      
+      return {
+        argumentsSchema,
+        defaultTargetUrl: data.default_target_url || ""
+      };
     } catch (err) {
-      console.error("Failed to fetch task arguments schema:", err);
-      return null;
+      console.error("Failed to fetch task data:", err);
+      return { argumentsSchema: null, defaultTargetUrl: "" };
     }
   };
 
@@ -422,6 +457,17 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
       }
     }
     
+    // Auto-populate target_url in request body if the endpoint has this field and task_id is available
+    if (['POST', 'PUT', 'PATCH'].includes(method) && endpointDetails?.requestBody?.content?.['application/json']?.schema) {
+      const requestBodySchema = resolveSchemaRef(endpointDetails.requestBody.content['application/json'].schema, schema);
+      if (hasTargetUrlField(requestBodySchema) && parameters.task_id) {
+        const { defaultTargetUrl } = await getTaskData(parameters.task_id);
+        if (defaultTargetUrl) {
+          setFormData(prev => ({ ...prev, target_url: defaultTargetUrl }));
+        }
+      }
+    }
+    
     // Auto-populate request body template for POST/PUT/PATCH
     if (['POST', 'PUT', 'PATCH'].includes(method)) {
       if (endpointDetails?.requestBody?.content?.['application/json']?.schema) {
@@ -434,6 +480,14 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
           const cdpUrl = await getCurrentBrowserCdpUrl();
           if (cdpUrl) {
             finalTemplate = { ...template, browser_cdp_url: cdpUrl };
+          }
+        }
+        
+        // Auto-populate target_url in template if present and task_id is available
+        if (finalTemplate && hasTargetUrlField(requestBodySchema) && parameters.task_id) {
+          const { defaultTargetUrl } = await getTaskData(parameters.task_id);
+          if (defaultTargetUrl) {
+            finalTemplate = { ...finalTemplate, target_url: defaultTargetUrl };
           }
         }
         
@@ -1080,19 +1134,26 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
               Auto-populated from current browser session
             </div>
           )}
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={async () => {
-              const cdpUrl = await getCurrentBrowserCdpUrl();
-              if (cdpUrl) {
-                setFormData(prev => ({ ...prev, [path]: cdpUrl }));
-              }
-            }}
-            className="w-full"
-          >
-            Refresh from Current Browser
-          </Button>
+        </div>
+      );
+    }
+    
+    // Special handling for target_url field
+    if (key === "target_url") {
+      return (
+        <div className="space-y-2">
+          <Input
+            type="text"
+            value={value}
+            onChange={(e) => setFormData(prev => ({ ...prev, [path]: e.target.value }))}
+            placeholder={schema.description || key}
+            className="font-mono text-sm"
+          />
+          {value && formData.task_id && (
+            <div className="text-xs text-gray-500">
+              Default URL loaded from task {formData.task_id}
+            </div>
+          )}
         </div>
       );
     }
@@ -1164,28 +1225,6 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
               Select a task ID to load arguments schema
             </div>
           )}
-          
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={async () => {
-              if (formData.task_id) {
-                setParametersSchemaLoading(true);
-                try {
-                  const schema = await getTaskArgumentsSchema(formData.task_id);
-                  setParametersSchema(schema);
-                } catch (err) {
-                  console.error("Failed to refresh parameters schema:", err);
-                } finally {
-                  setParametersSchemaLoading(false);
-                }
-              }
-            }}
-            className="w-full"
-            disabled={!formData.task_id}
-          >
-            Refresh Parameters Schema
-          </Button>
         </div>
       );
     }
@@ -1583,6 +1622,56 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
                             "root",
                             resolveSchemaRef(endpointDetails.requestBody.content['application/json'].schema, schema),
                             ""
+                          )}
+                          
+                          {/* Single "Load Default Params" button for all fields */}
+                          {(formData.task_id || selectedEndpoint) && (
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              onClick={async () => {
+                                // Load task data if task_id is available
+                                if (formData.task_id) {
+                                  setParametersSchemaLoading(true);
+                                  try {
+                                    const { argumentsSchema, defaultTargetUrl } = await getTaskData(formData.task_id);
+                                    
+                                    // Update parameters schema
+                                    setParametersSchema(argumentsSchema);
+                                    
+                                    // Update target_url if the field exists in the current endpoint
+                                    const endpointDetails = schema?.paths[selectedEndpoint]?.[selectedMethod.toLowerCase()];
+                                    if (endpointDetails?.requestBody?.content?.['application/json']?.schema) {
+                                      const requestBodySchema = resolveSchemaRef(endpointDetails.requestBody.content['application/json'].schema, schema);
+                                      if (hasTargetUrlField(requestBodySchema) && defaultTargetUrl) {
+                                        setFormData(prev => ({ ...prev, target_url: defaultTargetUrl }));
+                                      }
+                                    }
+                                  } catch (err) {
+                                    console.error("Failed to load task data:", err);
+                                  } finally {
+                                    setParametersSchemaLoading(false);
+                                  }
+                                }
+                                
+                                // Update browser_cdp_url for the current endpoint
+                                if (selectedEndpoint && selectedMethod && schema && ['POST', 'PUT', 'PATCH'].includes(selectedMethod)) {
+                                  const endpointDetails = schema.paths[selectedEndpoint]?.[selectedMethod.toLowerCase()];
+                                  if (endpointDetails?.requestBody?.content?.['application/json']?.schema) {
+                                    const requestBodySchema = resolveSchemaRef(endpointDetails.requestBody.content['application/json'].schema, schema);
+                                    if (hasBrowserCdpUrlField(requestBodySchema)) {
+                                      const cdpUrl = await getCurrentBrowserCdpUrl();
+                                      if (cdpUrl) {
+                                        setFormData(prev => ({ ...prev, browser_cdp_url: cdpUrl }));
+                                      }
+                                    }
+                                  }
+                                }
+                              }}
+                              className="w-full"
+                            >
+                              Load Default Params
+                            </Button>
                           )}
                         </div>
                       )}
