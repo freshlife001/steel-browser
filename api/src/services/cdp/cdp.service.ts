@@ -427,9 +427,9 @@ export class CDPService extends EventEmitter {
 
       page.on("console", (message) => {
         if (targetType === TargetType.BACKGROUND_PAGE) {
-          this.logger.info(`[CDPService] Extension console: ${message.type()}: ${message.text()}`);
+          this.logger.trace(`[CDPService] Extension console: ${message.type()}: ${message.text()}`);
         } else {
-          this.logger.info(`[CDPService] Console message: ${message.type()}: ${message.text()}`);
+          this.logger.trace(`[CDPService] Console message: ${message.type()}: ${message.text()}`);
         }
         this.customEmit(EmitEvent.Log, {
           type: BrowserEventType.Console,
@@ -542,8 +542,10 @@ export class CDPService extends EventEmitter {
         await this.pluginManager.onShutdown();
 
         this.removeAllHandlers();
-        await this.browserInstance.close();
-        await this.browserInstance.process()?.kill();
+        if (!env.CDP_UPSTEAM_URL) {
+          await this.browserInstance.close();
+          await this.browserInstance.process()?.kill();
+        }
         await this.shutdownHook();
 
         this.logger.info("[CDPService] Cleaning up files during shutdown");
