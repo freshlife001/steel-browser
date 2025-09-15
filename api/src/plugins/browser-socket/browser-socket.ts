@@ -64,6 +64,7 @@ const browserWebSocket: FastifyPluginAsync<BrowserSocketOptions> = async (
         await fastify.cdpService.proxyWebSocket(request, socket, head);
       } catch (err) {
         fastify.log.error({ err }, "CDP WebSocket error");
+        await fastify.cdpService.endSession();
         socket.destroy();
       }
     }
