@@ -177,6 +177,7 @@ export class CDPService extends EventEmitter {
       throw new Error("CDPService has not been launched yet!");
     }
     if (this.primaryPage.isClosed()) {
+      this.logger.info("[CDPService] Primary page was closed, creating a new one");
       this.primaryPage = await this.browserInstance.newPage();
     }
     return this.primaryPage;
@@ -225,6 +226,7 @@ export class CDPService extends EventEmitter {
   }
 
   public async refreshPrimaryPage() {
+    this.logger.info("[CDPService] Refreshing primary page");
     const newPage = await this.createPage();
     if (this.primaryPage) {
       // Notify plugins before page close
@@ -348,10 +350,30 @@ export class CDPService extends EventEmitter {
     }
   }
 
+  private isBlocked(url: string): boolean {
+    try {
+      const BLOCKED_HOSTS = [
+        "video.twimg.com",
+        "pbs.twimg.com",
+        "media.licdn.com",
+        "dms.licdn.com",
+      ];
+      const hostname = new URL(url).hostname;
+      return BLOCKED_HOSTS.some((adHost) => hostname === adHost || hostname.endsWith(`.${adHost}`));
+    } catch {
+      return false;
+    }
+  }
+
   private async handlePageRequest(request: HTTPRequest, page: Page) {
     const headers = request.headers();
     delete headers["accept-language"]; // Patch to help with headless detection
 
+    if (this.isBlocked(request.url())) {
+      this.logger.info(`[CDPService] Blocked request to resource: ${request.url()}`);
+      await request.abort();
+      return;
+    }
     if (this.launchConfig?.blockAds && isAdRequest(request.url())) {
       this.logger.info(`[CDPService] Blocked request to ad related resource: ${request.url()}`);
       await request.abort();
@@ -452,6 +474,7 @@ export class CDPService extends EventEmitter {
 
       //@ts-ignore
       const session = await page.target().createCDPSession();
+      await session.detach();
       await this.setupCDPLogging(session, targetType);
     } catch (error) {
       this.logger.error(`[CDPService] Error setting up page logging: ${error}`);
@@ -519,6 +542,7 @@ export class CDPService extends EventEmitter {
     if (!this.browserInstance) {
       throw new Error("Browser instance not initialized");
     }
+    this.logger.info("[CDPService] Creating a new page");
     return this.browserInstance.newPage();
   }
 
@@ -853,8 +877,19 @@ export class CDPService extends EventEmitter {
             "CDPService.launchBrowser",
             async () => {
               if (env.CDP_UPSTEAM_URL) {
+                const upstreamUrl = process.env.CDP_UPSTEAM_URL;
+                const targetUrl = `${upstreamUrl}/json/version`;
+                const response = await fetch(targetUrl, {
+                  method: "GET",
+                });
+                const json = await response.json();
+                const webSocketDebuggerUrl = json.webSocketDebuggerUrl;
                 return await puppeteer.connect({
-                  browserURL: env.CDP_UPSTEAM_URL,
+                  browserWSEndpoint: webSocketDebuggerUrl,
+                  targetFilter: (target) => {
+                    this.logger.info("targetFilter: " + target.type());
+                    return true;
+                  },
                 });
               }
               return await puppeteer.launch(finalLaunchOptions);

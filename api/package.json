@@ -29,7 +29,8 @@
     "dev": "npm run prepare:recorder && tsx watch src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1",
     "pretty": "prettier --write \"src/**/*.ts\"",
-    "generate:openapi": "ts-node ./openapi/generate.ts"
+    "generate:openapi": "ts-node ./openapi/generate.ts",
+    "connect": "node test.js"
   },
   "author": "Nasr Mohamed",
   "devDependencies": {

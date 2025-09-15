@@ -16,6 +16,7 @@ services:
       - ./.cache:/app/.cache
     networks:
       - steel-network
+    restart: unless-stopped
 
   ui:
     build:
@@ -31,6 +32,7 @@ services:
       - api
     networks:
       - steel-network
+    restart: unless-stopped
 
 networks:
   steel-network:
