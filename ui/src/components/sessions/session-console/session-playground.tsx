@@ -1440,25 +1440,6 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
 
   return (
     <div className="flex flex-col h-full bg-[var(--gray-2)]">
-      {/* Task Running Status */}
-      {currentRunId && (
-        <div className="p-4 border-b border-[var(--gray-6)] bg-black">
-          <SessionRunningStatus 
-            runId={currentRunId}
-            onComplete={(result) => {
-              console.log("Task completed:", result);
-              // Optionally clear the run ID or keep it for review
-            }}
-            onError={(error) => {
-              console.error("Task failed:", error);
-            }}
-            onClose={() => {
-              setCurrentRunId(null);
-            }}
-          />
-        </div>
-      )}
-      
       <div className="p-4 border-b border-[var(--gray-6)]">
         <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
           <div className="flex-1 min-w-0">
@@ -1501,6 +1482,24 @@ export default function SessionPlayground({ id }: SessionPlaygroundProps) {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
+        {/* Task Running Status */}
+        {currentRunId && (
+          <div className="mb-4">
+            <SessionRunningStatus 
+              runId={currentRunId}
+              onComplete={(result) => {
+                console.log("Task completed:", result);
+                // Optionally clear the run ID or keep it for review
+              }}
+              onError={(error) => {
+                console.error("Task failed:", error);
+              }}
+              onClose={() => {
+                setCurrentRunId(null);
+              }}
+            />
+          </div>
+        )}
         {endpointDetails && (
           <div className="space-y-4">
             {endpointDetails.summary && (
